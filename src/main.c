@@ -7,6 +7,7 @@ UART_HandleTypeDef huart2;
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+
 static void MX_I2C1_Init(void);
 static void Error_Handler(const char *why);
 static void I2C1_Scan(void);
@@ -25,7 +26,7 @@ static void uart_println(const char *s)
 int main(void)
 {
     HAL_Init();
-    SystemClock_Config;
+    SystemClock_Config();
 
     MX_GPIO_Init();
     MX_USART2_UART_Init();
