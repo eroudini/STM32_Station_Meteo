@@ -2,11 +2,13 @@
 #include <string.h>
 #include <stdio.h>
 #include "bmp280.h"
+#include "dht22.h"
 
 
 I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart2;
 bmp280_t bmp;
+dht22_t dht;
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -35,13 +37,20 @@ int main(void)
     MX_USART2_UART_Init();
     MX_I2C1_Init();
 
-    uart_print("Init BMP280...");
+    uart_println("Init BMP280...");
     if (bmp280_init(&bmp, &hi2c1, 0x76) != HAL_OK)
     {
         uart_println("BMP280 @0x76 KO, on tente 0x77...");
         if(bmp280_init(&bmp, &hi2c1, 0x77) != HAL_OK) {
             Error_Handler("BMP280 Non detecté");
         }
+    }
+
+    uart_println("Init DHT22...");
+    if (dht22_init(&dht, GPIOA, GPIO_PIN_8) != HAL_OK) {
+        uart_println("DHT22 init KO");
+    } else {
+        uart_println("DHT22 init OK");
     }
 
     uart_println("BMP280 Ok");
@@ -67,6 +76,22 @@ int main(void)
                 uart_print(line);
             } else {
                 uart_println("BMP280 Lecture KO");
+            }
+        }
+
+        static uint32_t t_dht = 0;
+        if (HAL_GetTick() - t_dht >= 2000) {
+            t_dht = HAL_GetTick();
+
+            float tc = 0.0f, hr = 0.0f;
+            HAL_StatusTypeDef st = dht22_read(&dht, &tc, &hr);
+            if (st == HAL_OK) {
+                char line[96];
+
+                snprintf(line, sizeof(line), "CSV_DHT22: %.1f;%.1f\r\n", tc, hr);
+                uart_print(line);
+            } else {
+                uart_println("DHT22 lecture KO (timeout/CRC)");
             }
         }
 
