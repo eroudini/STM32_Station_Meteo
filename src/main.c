@@ -1,9 +1,12 @@
 #include "stm32f4xx_hal.h"
 #include <string.h>
 #include <stdio.h>
+#include "bmp280.h"
+
 
 I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart2;
+bmp280_t bmp;
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -32,12 +35,42 @@ int main(void)
     MX_USART2_UART_Init();
     MX_I2C1_Init();
 
+    uart_print("Init BMP280...");
+    if (bmp280_init(&bmp, &hi2c1, 0x76) != HAL_OK)
+    {
+        uart_println("BMP280 @0x76 KO, on tente 0x77...");
+        if(bmp280_init(&bmp, &hi2c1, 0x77) != HAL_OK) {
+            Error_Handler("BMP280 Non detecté");
+        }
+    }
+
+    uart_println("BMP280 Ok");
+    
+
     uart_print("=== Boot Ok (STM32F407 @168Mhz) ===");
     uart_println("Test : scan I2C...");
     I2C1_Scan();
 
     while (1)
     {
+
+        // LECTURE DU CAPTEUR BMP280 toutes les 2 secondes
+        
+        static uint32_t t0 = 0;
+        if(HAL_GetTick() - t0 >= 2000) {
+            t0 = HAL_GetTick();
+
+            float tc = 0.0f, pa = 0.0f;
+            if(bmp280_read_fixed(&bmp, &tc, &pa) == HAL_OK) {
+                char line[96];
+                snprintf(line, sizeof(line), "CSV: %.2f;%.2f\n", tc, pa);
+                uart_print(line);
+            } else {
+                uart_println("BMP280 Lecture KO");
+            }
+        }
+
+
         HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_8);
         HAL_Delay(500);
     }
@@ -220,6 +253,8 @@ static void I2C1_Scan(void)
     
 
 }
+
+
 
     // Handler centralisé 
 
