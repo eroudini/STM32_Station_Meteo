@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "bmp280.h"
 #include "dht22.h"
+#include "ssd1306.h"
 
 
 I2C_HandleTypeDef hi2c1;
@@ -36,6 +37,15 @@ int main(void)
     MX_GPIO_Init();
     MX_USART2_UART_Init();
     MX_I2C1_Init();
+    MX_USART2_UART_Init();
+
+    // init ecran
+    ssd1306_Init(&hi2c1);
+    ssd1306_Fill(black);
+    ssd1306_SetCursor(0,0);
+    ssd1306_WriteString("Station meteo");
+    ssd1306_UpdateScreen();
+
 
     uart_println("Init BMP280...");
     if (bmp280_init(&bmp, &hi2c1, 0x76) != HAL_OK)
@@ -62,6 +72,30 @@ int main(void)
 
     while (1)
     {
+
+        float t = 23.4f;
+        float h = 45.0f;
+        float p = 101215.0f;
+
+        char line[32];
+
+        ssd1306_Fill(black);
+
+        ssd1306_SetCursor(0, 0);
+        snprintf(line, sizeof(line), "T: %.1f C", t);
+        ssd1306_WriteString(line);
+
+        ssd1306_SetCursor(0, 10);
+        snprintf(line, sizeof(line), "H: %.1f %%", h);
+        ssd1306_WriteString(line);
+
+        ssd1306_SetCursor(0, 20);
+        if (p > 1.0f) snprintf(line, sizeof(line), "P: %.1f hPa", p/100.0f);
+        else snprintf(line, sizeof(line), "P: --.- hPa");
+        ssd1306_WriteString(line);
+
+        ssd1306_UpdateScreen();
+        HAL_Delay(2000);
 
         // LECTURE DU CAPTEUR BMP280 toutes les 2 secondes
         
