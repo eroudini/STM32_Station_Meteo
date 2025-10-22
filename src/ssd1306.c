@@ -149,7 +149,7 @@ HAL_StatusTypeDef ssd1306_Init(I2C_HandleTypeDef *hi2c)
 
     ssd1306.initialized = true;
 
-    ssd1306_Fill(black);
+    ssd1306_Fill(Black);
     ssd1306_UpdateScreen();
     return HAL_OK;
 }
@@ -160,7 +160,7 @@ HAL_StatusTypeDef ssd1306_Init(I2C_HandleTypeDef *hi2c)
 
 void ssd1306_Fill(ssd1306_color color)
 {
-    memset(ssd1306.buffer, (color = black) ? 0x00 : 0xFF, sizeof(ssd1306.buffer));
+    memset(ssd1306.buffer, (color = Black) ? 0x00 : 0xFF, sizeof(ssd1306.buffer));
 
 }
 
@@ -185,7 +185,7 @@ void ssd1306_DrawPixel(uint16_t x, uint16_t y, ssd1306_color color)
     uint32_t index = x + (y / 8) * SSD1306_WIDTH;
     uint8_t mask = 1 << (y & 7);
 
-    if (color == white) ssd1306.buffer[index] |= mask;
+    if (color == White) ssd1306.buffer[index] |= mask;
     else ssd1306.buffer[index] &= ~mask;
 }
 
@@ -206,12 +206,12 @@ void ssd1306_WriteChar(char ch)
     for (int col = 0; col < 5; col++) {
         uint8_t bits = glyph[col];
         for (int row = 0; row < 7; row++) {
-            ssd1306_DrawPixel(ssd1306.cursor_x + col, ssd1306.cursor_y + row, (bits & (1 << row)) ? white : black);
+            ssd1306_DrawPixel(ssd1306.cursor_x + col, ssd1306.cursor_y + row, (bits & (1 << row)) ? White : Black);
         }
     }
 
     for (int row = 0; row < 7; row++)
-        ssd1306_DrawPixel(ssd1306.cursor_x + 5, ssd1306.cursor_y + row, black);
+        ssd1306_DrawPixel(ssd1306.cursor_x + 5, ssd1306.cursor_y + row, Black);
 
     ssd1306.cursor_x += 6;
 }

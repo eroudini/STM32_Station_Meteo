@@ -10,7 +10,7 @@
 #define SSD1306_HEIGHT 64
 #define SSD1306_ADDR_8B (0x3C << 1)
 
-typedef enum { black = 0x00, white = 0x01 } ssd1306_color;
+typedef enum { Black = 0x00, White = 0x01 } ssd1306_color;
 
 typedef struct {
 

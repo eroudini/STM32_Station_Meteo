@@ -17,10 +17,79 @@ static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void Error_Handler(const char *why);
 static void I2C1_Scan(void);
+static void MX_USART2_UART_Init(void);
 
 static void uart_print(const char *s)
 {
     HAL_UART_Transmit(&huart2, (uint8_t*)s, (uint16_t)strlen(s), HAL_MAX_DELAY);
+}
+
+// Structure pour stocker un échantillon complet : température, humidité, pression + horodatage
+typedef struct {
+    float t_c;
+    float h_pct;
+    float p_pa;
+    uint32_t ms;
+} sample_t;
+
+/*Lecture*/
+
+static void read_all(sample_t *s) 
+{
+    s->ms = HAL_GetTick();
+
+    float t=0, h=0;
+    if (dht22_read(&dht, &t) == HAL_OK){
+        s->t_c = t;
+        s->h_pct =h;
+    } else {
+        s->t_c = -1000.0f;
+        s->h_pct = -1.0f;
+    }
+    float tc=0, p=0;
+    if (bmp280_read_fixed(&bmp, &tc, &p) == HAL_OK) {
+        s->p_pa = p;
+        if (s->t_c < -100.0f) s->t_c = tc;
+    } else {
+        s->p_pa = -1.0f;
+    }
+}
+
+/*Affichage OLED simple*/
+
+static void oled_show_sample(const sample_t *s) {
+    char line[32];
+
+    ssd1306_Fill(Black);
+
+    // affichage temperature
+    ssd1306_SetCursor(0, 0);
+    if (s->t_c > -100.0f) snprintf(line, sizeof(line), "T: %.1f C", s->t_c);
+    else                  snprintf(line, sizeof(line), "T: --.- C");
+    ssd1306_WriteString(line);
+
+    // affichage de l'humidité
+
+    ssd1306_SetCursor(0, 10);
+    if(s->h_pct >= 0.0f) snprintf(line, sizeof(line), "H: %.1f %%", s->h_pct);
+    else                 snprintf(line, sizeof(line), "H: --.- %%");
+    ssd1306_WriteString(line);
+
+    // affichage de la pression
+
+    ssd1306_SetCursor(0, 20);
+    if (s->p_pa > 0.0f) snprintf(line, sizeof(line), "P: %.1f hPa", s->p_pa/100.0f);
+    else                snprintf(line, sizeof(line), "P: --.- hPa");
+    ssd1306_WriteString(line);
+
+    ssd1306_UpdateScreen();
+}
+
+/*Sortie CSV : temperature/humidité/pression\n*/
+static void uart_send_csv(const sample_t *s) {
+    char line[64];
+    snprintf(line, sizeof(line), "%.2f;%.2f;%.0f\r\n", s->t_c, s->h_pct, s->p_pa);
+    uart_print(line);
 }
 
 static void uart_println(const char *s)
@@ -37,11 +106,11 @@ int main(void)
     MX_GPIO_Init();
     MX_USART2_UART_Init();
     MX_I2C1_Init();
-    MX_USART2_UART_Init();
+
 
     // init ecran
     ssd1306_Init(&hi2c1);
-    ssd1306_Fill(black);
+    ssd1306_Fill(Black);
     ssd1306_SetCursor(0,0);
     ssd1306_WriteString("Station meteo");
     ssd1306_UpdateScreen();
@@ -72,66 +141,30 @@ int main(void)
 
     while (1)
     {
-
-        float t = 23.4f;
-        float h = 45.0f;
-        float p = 101215.0f;
-
-        char line[32];
-
-        ssd1306_Fill(black);
-
-        ssd1306_SetCursor(0, 0);
-        snprintf(line, sizeof(line), "T: %.1f C", t);
-        ssd1306_WriteString(line);
-
-        ssd1306_SetCursor(0, 10);
-        snprintf(line, sizeof(line), "H: %.1f %%", h);
-        ssd1306_WriteString(line);
-
-        ssd1306_SetCursor(0, 20);
-        if (p > 1.0f) snprintf(line, sizeof(line), "P: %.1f hPa", p/100.0f);
-        else snprintf(line, sizeof(line), "P: --.- hPa");
-        ssd1306_WriteString(line);
-
-        ssd1306_UpdateScreen();
-        HAL_Delay(2000);
-
-        // LECTURE DU CAPTEUR BMP280 toutes les 2 secondes
         
-        static uint32_t t0 = 0;
-        if(HAL_GetTick() - t0 >= 2000) {
-            t0 = HAL_GetTick();
+       // Temps courant (en ms)
+    uint32_t now = HAL_GetTick();
 
-            float tc = 0.0f, pa = 0.0f;
-            if(bmp280_read_fixed(&bmp, &tc, &pa) == HAL_OK) {
-                char line[96];
-                snprintf(line, sizeof(line), "CSV: %.2f;%.2f\n", tc, pa);
-                uart_print(line);
-            } else {
-                uart_println("BMP280 Lecture KO");
-            }
-        }
+    // 1) Mesure + affichage OLED + envoi UART toutes les 2 s
+    static uint32_t t_meas = 0;
+    if (now - t_meas >= 2000) {
+        t_meas = now;
 
-        static uint32_t t_dht = 0;
-        if (HAL_GetTick() - t_dht >= 2000) {
-            t_dht = HAL_GetTick();
+        sample_t s;              // snapshot T/H/P + horodatage
+        read_all(&s);            // lit DHT22 + BMP280 et remplit s
+        oled_show_sample(&s);    // affiche sur SSD1306
+        uart_send_csv(&s);       // envoie "T;H;P" sur UART
+    }
 
-            float tc = 0.0f, hr = 0.0f;
-            HAL_StatusTypeDef st = dht22_read(&dht, &tc, &hr);
-            if (st == HAL_OK) {
-                char line[96];
-
-                snprintf(line, sizeof(line), "CSV_DHT22: %.1f;%.1f\r\n", tc, hr);
-                uart_print(line);
-            } else {
-                uart_println("DHT22 lecture KO (timeout/CRC)");
-            }
-        }
-
-
+    // 2) Blink LED toutes les 500 ms (optionnel, “alive”)
+    static uint32_t t_led = 0;
+    if (now - t_led >= 500) {
+        t_led = now;
         HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_8);
-        HAL_Delay(500);
+    }
+
+    // 3) Petit yield pour laisser respirer le CPU / IRQ
+    HAL_Delay(10);
     }
     
 }
