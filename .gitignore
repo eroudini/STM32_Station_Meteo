@@ -3,3 +3,5 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+# Fichier contenant des identifiants Wi-Fi / API
+**/secrets.h
