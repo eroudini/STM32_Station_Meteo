@@ -1,9 +1,10 @@
 #include "stm32f4xx_hal.h"
 #include <string.h>
 #include <stdio.h>
-#include "bmp280.h"
-#include "dht22.h"
-#include "ssd1306.h"
+#include <stdbool.h>
+#include "../../Inc/bmp280.h"
+#include "../../Inc/dht22.h"
+#include "../../Inc/ssd1306.h"
 
 
 I2C_HandleTypeDef hi2c1;
@@ -18,6 +19,44 @@ static void MX_I2C1_Init(void);
 static void Error_Handler(const char *why);
 static void I2C1_Scan(void);
 static void MX_USART2_UART_Init(void);
+IWDG_HandleTypeDef hiwdg;
+
+
+static void Watchdog_Init_2s(void) {
+
+    hiwdg.Instance = IWDG;
+    hiwdg.Init.Prescaler = IWDG_PRESCALER_64;
+    hiwdg.Init.Reload = 1000;
+    HAL_IWDG_Init(&hiwdg);
+}
+
+#define AVG_N 5
+typedef struct { float buf[AVG_N]; int idx; int cnt; float sum; } avg_t;
+
+static void avg_reset(avg_t *a){ memset(a, 0, sizeof(*a)); }
+static float avg_psuh (avg_t *a, float v){
+    a->sum -= a->buf[a->idx];
+    a->buf[a->idx] = v;
+    a->sum += v;
+    a->idx = (a->idx + 1) % AVG_N;
+    if (a->cnt < AVG_N) a->cnt++;
+    return a->sum / (float)a->cnt;
+}
+
+static avg_t avg_T, avg_H, avg_P;
+
+static int bmp_fail_count = 0;
+
+static void I2C1_RecoverAndReinit(void)
+{
+    HAL_I2C_DeInit(&hi2c1);
+    MX_I2C1_Init();
+
+    if (bmp280_init(&bmp, &hi2c1, 0x76) != HAL_OK) {
+        (void)bmp280_init(&bmp, &hi2c1, 0x77);
+    }
+    ssd1306_Init(&hi2c1);
+}
 
 static void uart_print(const char *s)
 {
@@ -36,22 +75,39 @@ typedef struct {
 
 static void read_all(sample_t *s) 
 {
-    s->ms = HAL_GetTick();
+s->ms = HAL_GetTick();
 
+    /* --- DHT22: T/H --- */
     float t=0, h=0;
-    if (dht22_read(&dht, &t) == HAL_OK){
-        s->t_c = t;
-        s->h_pct =h;
+    if (dht22_read(&dht, &t, &h) == HAL_OK) {
+        /* bornes plausibles avant lissage */
+        if (t > -40.0f && t < 85.0f)  s->t_c   = avg_push(&avg_T, t);
+        else                         s->t_c   = -1000.0f;
+
+        if (h >= 0.0f && h <= 100.0f) s->h_pct = avg_push(&avg_H, h);
+        else                          s->h_pct = -1.0f;
     } else {
-        s->t_c = -1000.0f;
+        s->t_c   = -1000.0f;
         s->h_pct = -1.0f;
     }
+
+    /* --- BMP280: P (+ T interne en secours) --- */
     float tc=0, p=0;
     if (bmp280_read_fixed(&bmp, &tc, &p) == HAL_OK) {
-        s->p_pa = p;
-        if (s->t_c < -100.0f) s->t_c = tc;
+        bmp_fail_count = 0;
+        /* bornes plausibles pression: 80–110 kPa */
+        if (p > 80000.0f && p < 110000.0f) s->p_pa = avg_push(&avg_P, p);
+        else                               s->p_pa = -1.0f;
+
+        /* si DHT KO, fallback sur T BMP (et lisse aussi) */
+        if (s->t_c < -100.0f && (tc > -40.0f && tc < 85.0f))
+            s->t_c = avg_push(&avg_T, tc);
     } else {
         s->p_pa = -1.0f;
+        if (++bmp_fail_count >= 3) {
+            bmp_fail_count = 0;
+            I2C1_RecoverAndReinit();
+        }
     }
 }
 
@@ -114,6 +170,9 @@ int main(void)
     ssd1306_SetCursor(0,0);
     ssd1306_WriteString("Station meteo");
     ssd1306_UpdateScreen();
+    avg_reset(&avg_T); avg_reset(&avg_H); avg_reset(&avg_P);
+    Watchdog_Init_2s();
+
 
 
     uart_println("Init BMP280...");
@@ -141,7 +200,8 @@ int main(void)
 
     while (1)
     {
-        
+    
+    static uint32_t t0 = 0;
        // Temps courant (en ms)
     uint32_t now = HAL_GetTick();
 
@@ -153,7 +213,9 @@ int main(void)
         sample_t s;              // snapshot T/H/P + horodatage
         read_all(&s);            // lit DHT22 + BMP280 et remplit s
         oled_show_sample(&s);    // affiche sur SSD1306
-        uart_send_csv(&s);       // envoie "T;H;P" sur UART
+        uart_send_csv(&s);   // envoie "T;H;P" sur UART
+
+        HAL_IWDG_Refresh(&hiwdg);
     }
 
     // 2) Blink LED toutes les 500 ms (optionnel, “alive”)
